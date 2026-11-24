@@ -275,4 +275,40 @@ mu.mem_write(STORED, struct.pack("<I", 77))
 fill(FB0, 0x4321)
 mu.mem_write(FB0 + (PAD_Y * 800 + PAD_X) * 2, struct.pack("<H", 0x7FFF))
 assert paint(FB0) == 0x77 and data20() == 2 and region(FB0) == pad_pixels(False)
-print("model lock paint: the press draws / wipes the padlock in both buffers, the paint keeps it up, guards, results and registers kept: OK")
+# a key released after leaving a menu: the padlock is redrawn when a lock is on (the stock paint can come while the menu flag is set)
+st["sel"] = 5
+mu.mem_write(STORED, struct.pack("<I", 9))
+mu.mem_write(DATA + 4, struct.pack("<2I", 0, 0))
+mu.mem_write(DATA + 12, struct.pack("<I", 9))
+press(send)                                                                      # block 5 locked
+fill(FB0, 0x4321)
+fill(FB1, 0x4321)
+mu.mem_write(DATA + 20, struct.pack("<I", 0))
+assert send(1, 2, 2) == "pass" and region(FB0) == pad_pixels(True) and region(FB1) == pad_pixels(True) and data20() == 3
+assert send(1, 2, 1) == "pass" and st["calls"] == []                             # a press of another key: nothing to do
+assert send(1, 14, 2) == "pass"                                                  # any other key's release does it
+fill(FB0, 0x4321)
+mu.mem_write(STATE60, bytes([1]))                                                # still in the Action menu: no drawing
+assert send(1, 2, 2) == "pass" and region(FB0) == plain(0x4321)
+mu.mem_write(STATE60, bytes([0]))
+mu.mem_write(SCREEN0, struct.pack("<I", 0))                                      # the Menu button screen: no drawing
+assert send(1, 2, 2) == "pass" and region(FB0) == plain(0x4321)
+mu.mem_write(SCREEN0, struct.pack("<I", 1))
+st["sel"] = 7                                                                    # a non-NAM block selected: no drawing
+assert send(1, 2, 2) == "pass" and region(FB0) == plain(0x4321)
+st["sel"] = 22                                                                   # the pedal block: not locked, no drawing
+assert send(1, 2, 2) == "pass" and region(FB0) == plain(0x4321)
+st["sel"] = 5
+# the release of a knob-1 press that closed a menu (Copy Block ...): swallowed, and the padlock is drawn again
+fill(FB0, 0x4321)
+fill(FB1, 0x4321)
+mu.mem_write(DATA + 20, struct.pack("<I", 0))
+assert send(1, 12, 2) == "swallow" and region(FB0) == pad_pixels(True) and region(FB1) == pad_pixels(True) and data20() == 3
+assert bits()[0] == 1 << 5                                                       # and nothing toggled
+fill(FB0, 0x4321)
+assert send(1, 12, 5) == "swallow" and region(FB0) == plain(0x4321)              # a hold of the press: swallowed, no drawing
+press(send)                                                                      # unlock: no lock anywhere any more
+assert region(FB0) == pad_pixels(False) and data20() == 0
+st["calls"].clear()
+assert send(1, 2, 2) == "pass" and st["calls"] == []                             # no lock bits: no stock call at all
+print("model lock paint: the press draws / wipes the padlock in both buffers, the paint keeps it up, a key release redraws it after a menu, guards, results and registers kept: OK")

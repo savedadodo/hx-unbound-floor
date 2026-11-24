@@ -144,18 +144,32 @@ ml_event:
 ml_key:
     ldrb r1, [r0, #1]
     cmp r1, #KEY_KNOB1
+    beq ml_knob1
+    ldr r1, [r0, #4]                @ any other key: on its release, redraw the padlock if a lock is on (the stock repaint that
+    cmp r1, #2                      @ follows leaving a menu can come while the menu flag is still set, and nothing paints after)
     bne ml_pass
+    adr.w r12, ml_data
+    ldr r1, [r12, #4]
+    ldr r2, [r12, #8]
+    orrs r1, r2
+    beq ml_pass                     @ no lock anywhere
+    movs r3, #2
+    b ml_chk
+ml_knob1:
     movs r3, #1
 ml_chk:
     push {r0, r3, r4, r5, r6, lr}
     bl ml_guard
-    cbz r0, ml_out
+    cmp r0, #0
+    beq.w ml_out
     bl ml_pid
     cmp r0, #0
     blt ml_out                      @ not a NAM block
     bl ml_bit
     ldr r1, [r5]
-    ldr r3, [sp, #4]                @ the kind
+    ldr r3, [sp, #4]                @ the kind: 0 a knob 1 turn, 1 its press, 2 another key's release
+    cmp r3, #2
+    beq ml_redraw
     cbnz r3, ml_press
     tst r1, r6                      @ a turn: swallowed when locked
     beq ml_out
@@ -164,7 +178,21 @@ ml_press:
     ldr r0, [sp]                    @ the event
     ldr r0, [r0, #4]                @ its value
     cmp r0, #1
-    bne ml_swallow                  @ a release / hold of the press: swallowed, no toggle
+    beq ml_toggle
+    cmp r0, #2
+    bne ml_swallow                  @ a hold of the press: swallowed, no toggle
+    tst r1, r6                      @ its release: swallowed, no toggle; and when this block is locked the padlock again, in case
+    beq ml_swallow                  @ the press closed a menu (Copy Block ...) whose last stock paint came before it was gone
+    movs r2, #1
+    ldr r4, =FB0
+    bl ml_blit
+    ldr r4, =FB1
+    bl ml_blit
+    movs r0, #3
+    adr.w r12, ml_data
+    str r0, [r12, #20]
+    b ml_swallow
+ml_toggle:
     eors r1, r6
     str r1, [r5]
     movs r2, #0                     @ the stock paints only what changed and toggling changes no widget: draw (or wipe) the
@@ -181,6 +209,19 @@ ml_press:
 ml_nodraw:
     adr.w r12, ml_data
     str r0, [r12, #20]
+    b ml_swallow
+ml_redraw:
+    tst r1, r6                      @ this block locked: the padlock again in both buffers (idempotent); the event goes on
+    beq ml_out
+    movs r2, #1
+    ldr r4, =FB0
+    bl ml_blit
+    ldr r4, =FB1
+    bl ml_blit
+    movs r0, #3
+    adr.w r12, ml_data
+    str r0, [r12, #20]
+    b ml_out
 ml_swallow:
     pop {r0, r3, r4, r5, r6, lr}
     movs r0, #0
